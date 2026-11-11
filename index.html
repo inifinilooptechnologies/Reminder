@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Break Reminder</title>
+<style>
+  :root {
+    --bg: #eaf3f5;
+    --card: #ffffff;
+    --ink: #12303a;
+    --muted: #5b7680;
+    --line: #d3e3e8;
+    --water: #2a9bc0;
+    --water-deep: #1b7a9c;
+    --go: #2f8f5f;
+    --danger: #b8432f;
+    --radius: 18px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1d23;
+      --card: #162a32;
+      --ink: #e6f2f5;
+      --muted: #8fa9b3;
+      --line: #264049;
+      --water: #3bb0d6;
+      --water-deep: #2a9bc0;
+      --go: #4cb882;
+      --danger: #e5705a;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: "Nunito", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 24px 16px 48px;
+  }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; font-weight: 800; }
+  .sub { color: var(--muted); margin: 4px 0 22px; line-height: 1.4; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  h2 { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
+  h3.small { font-size: .9rem; font-weight: 700; margin: 18px 0 8px; }
+
+  /* Timer: a glass that fills with water as the break gets closer */
+  .glass {
+    position: relative;
+    width: 230px; height: 230px;
+    border-radius: 50%;
+    margin: 4px auto 18px;
+    border: 4px solid var(--water);
+    overflow: hidden;
+    background: var(--card);
+  }
+  .water {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 0%;
+    background: linear-gradient(180deg, var(--water), var(--water-deep));
+    opacity: .28;
+    transition: height 1s linear;
+  }
+  .glass-text {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  #time { font-size: 3.2rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #status { color: var(--muted); font-size: .95rem; margin-top: 2px; }
+
+  .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  button {
+    font: inherit; font-weight: 700;
+    border: 0; border-radius: 12px;
+    padding: 12px 22px; cursor: pointer;
+    color: #fff; background: var(--water-deep);
+  }
+  button.secondary { background: transparent; color: var(--ink); border: 1.5px solid var(--line); }
+  button.go { background: var(--go); }
+  button.small { padding: 8px 14px; font-size: .9rem; }
+  button.icon {
+    background: transparent; color: var(--danger);
+    padding: 4px 10px; font-size: 1.2rem; line-height: 1;
+  }
+  button:disabled { opacity: .6; cursor: wait; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--water); outline-offset: 2px; }
+  button:active { transform: translateY(1px); }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip {
+    background: transparent; color: var(--ink);
+    border: 1.5px solid var(--line);
+    padding: 8px 14px; border-radius: 999px; font-weight: 600;
+  }
+  .chip.on { background: var(--water-deep); border-color: var(--water-deep); color: #fff; }
+  label.field { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  input[type=number], input[type=text], input[type=email], input[type=password], select {
+    font: inherit; padding: 9px 11px;
+    border: 1.5px solid var(--line); border-radius: 10px;
+    background: var(--bg); color: var(--ink);
+  }
+  input[type=number] { width: 84px; }
+  input[type=text], input[type=email], input[type=password] { flex: 1; min-width: 0; width: 100%; }
+  select { width: 100%; }
+  input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--water-deep); flex: none; }
+  input[type=range] { flex: 1; accent-color: var(--water-deep); }
+  .types label.item { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+  .types .item .grow { flex: 1; overflow-wrap: anywhere; }
+  .add-row { display: flex; gap: 8px; margin-top: 12px; }
+  .stack { display: grid; gap: 10px; }
+  .note { color: var(--muted); font-size: .85rem; margin-top: 8px; line-height: 1.4; overflow-wrap: anywhere; }
+  .hidden { display: none; }
+
+  .songs { list-style: none; padding: 0; margin-top: 8px; }
+  .songs li {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 0; border-top: 1px solid var(--line);
+  }
+  .songs .name { flex: 1; overflow-wrap: anywhere; font-size: .95rem; }
+
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; text-align: center; }
+  .stat b { display: block; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: .75rem; color: var(--muted); }
+
+  /* Full screen reminder */
+  #overlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(10, 30, 38, .86);
+    padding: 20px;
+  }
+  #overlay.show { display: flex; }
+  .popup {
+    background: var(--card); color: var(--ink);
+    border-radius: 24px; padding: 32px 24px;
+    max-width: 400px; width: 100%; text-align: center;
+    animation: pop .35s ease-out;
+  }
+  @keyframes pop { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .popup .emoji { font-size: 4rem; line-height: 1; }
+  .popup h3 { font-size: 1.6rem; margin: 14px 0 8px; overflow-wrap: anywhere; }
+  .popup p { color: var(--muted); line-height: 1.5; margin-bottom: 22px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .water { transition: none; }
+    .popup { animation: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Break Reminder</h1>
+  <p class="sub">A gentle nudge to walk, drink water and rest your eyes while you work.</p>
+
+  <section class="card">
+    <div class="glass" aria-label="Time until next break">
+      <div class="water" id="water"></div>
+      <div class="glass-text">
+        <div id="time">45:00</div>
+        <div id="status">Ready to start</div>
+      </div>
+    </div>
+    <div class="row">
+      <button id="startBtn" class="go">Start</button>
+      <button id="resetBtn" class="secondary">Reset</button>
+    </div>
+  </section>
+
+  <section class="card" id="authCard">
+    <h2>Save online</h2>
+    <div id="authOut" class="stack">
+      <input type="email" id="email" placeholder="Email" autocomplete="email" aria-label="Email">
+      <input type="password" id="password" placeholder="Password (at least 6 characters)" autocomplete="current-password" aria-label="Password">
+      <div class="row" style="justify-content:flex-start">
+        <button id="loginBtn" class="small">Log in</button>
+        <button id="signupBtn" class="secondary small">Create account</button>
+      </div>
+    </div>
+    <div id="authIn" class="hidden">
+      <p id="who"></p>
+      <div class="row" style="justify-content:flex-start; margin-top:10px">
+        <button id="logoutBtn" class="secondary small">Log out</button>
+      </div>
+    </div>
+    <p class="note" id="authMsg"></p>
+  </section>
+
+  <section class="card">
+    <h2>Remind me every</h2>
+    <div class="chips" id="chips"></div>
+    <label class="field">Custom
+      <input type="number" id="custom" min="1" max="240" aria-label="Custom minutes">
+      minutes
+    </label>
+  </section>
+
+  <section class="card">
+    <h2>What should I remind you about?</h2>
+    <div class="types" id="types"></div>
+    <div class="add-row">
+      <input type="text" id="newText" maxlength="60" placeholder="Add your own, e.g. Take your medicine" aria-label="New reminder text">
+      <button id="addBtn" class="small">Add</button>
+    </div>
+    <p class="note">Your own reminders join the rotation with the built-in ones. Untick or delete them any time.</p>
+  </section>
+
+  <section class="card">
+    <h2>Alert sound</h2>
+    <label class="field" style="margin-top:0"><input type="checkbox" id="sound"> Play a sound when it is break time</label>
+    <label class="field"><input type="checkbox" id="notify"> Show a desktop notification</label>
+
+    <div id="soundOptions">
+      <h3 class="small">Sound to play</h3>
+      <select id="soundSel" aria-label="Sound to play"></select>
+      <label class="field">Volume <input type="range" id="volume" min="0.1" max="1" step="0.05"></label>
+      <div class="row" style="justify-content:flex-start; margin-top:12px">
+        <button class="secondary small" id="previewBtn">Preview</button>
+        <button class="small" id="songBtn">Add favourite songs</button>
+        <input type="file" id="songFile" accept="audio/*" multiple class="hidden">
+      </div>
+      <p class="note" id="songMsg">Pick MP3, WAV, M4A or any audio file.</p>
+      <ul class="songs" id="songList"></ul>
+    </div>
+    <p class="note">Keep this tab open in the background. Notifications help when you are in another window.</p>
+  </section>
+
+  <section class="card">
+    <h2>Today</h2>
+    <div class="stats">
+      <div class="stat"><b id="s-walk">0</b><span>Walks</span></div>
+      <div class="stat"><b id="s-water">0</b><span>Water</span></div>
+      <div class="stat"><b id="s-stretch">0</b><span>Stretches</span></div>
+      <div class="stat"><b id="s-eyes">0</b><span>Eye rests</span></div>
+      <div class="stat"><b id="s-other">0</b><span>Your own</span></div>
+    </div>
+  </section>
+</main>
+
+<div id="overlay" role="alertdialog" aria-modal="true" aria-labelledby="pTitle">
+  <div class="popup">
+    <div class="emoji" id="pEmoji"></div>
+    <h3 id="pTitle"></h3>
+    <p id="pText"></p>
+    <div class="row">
+      <button class="go" id="doneBtn">Done</button>
+      <button class="secondary" id="snoozeBtn">Snooze 5 min</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+/* =====================================================================
+   STEP 1: paste your Supabase details here
+   (Supabase dashboard > Project Settings > API)
+   The anon key is safe to put in a web page. Row level security protects data.
+   ===================================================================== */
+const SUPABASE_URL = "https://oxlmgczokunkrhhbmbyw.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im94bG1nY3pva3Vua3JoaGJtYnl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQzNzIxNTIsImV4cCI6MjEwOTk0ODE1Mn0.bFGL_9SICJbBoSJsqdss-nTlLbMwJ9Zf1T5w5Wx0LV8";
+
+(function () {
+  const BUILTIN = {
+    walk:    { emoji: "🚶", title: "Time for a walk",   text: "Stand up and walk for 2 to 5 minutes. Your back will thank you.", label: "Take a walk",    stat: "walk" },
+    water:   { emoji: "💧", title: "Drink some water",  text: "Fill your glass and drink a few sips. Stay hydrated.",            label: "Drink water",    stat: "water" },
+    stretch: { emoji: "🧘", title: "Stretch your body", text: "Roll your shoulders, stretch your neck and straighten your back.", label: "Stretch",        stat: "stretch" },
+    eyes:    { emoji: "👀", title: "Rest your eyes",    text: "Look at something far away for 20 seconds.",                      label: "Rest your eyes", stat: "eyes" }
+  };
+  const PRESETS = [20, 30, 45, 60];
+  const MAX_SONG_MB = 25;
+
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  const today = () => new Date().toLocaleDateString("en-CA"); // local date, YYYY-MM-DD
+  const blankStats = () => ({ date: today(), walk: 0, water: 0, stretch: 0, eyes: 0, other: 0 });
+
+  /* ---------- Supabase client ---------- */
+  const cloudOn = !SUPABASE_URL.startsWith("YOUR_") && !SUPABASE_ANON_KEY.startsWith("YOUR_") && window.supabase;
+  const cloud = cloudOn ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+  let user = null;
+
+  /* ---------- State ---------- */
+  let settings = Object.assign({
+    minutes: 45,
+    types: ["walk", "water", "stretch", "eyes"],  // enabled keys; custom ones look like "c<id>"
+    custom: [],                                    // [{ id, text }]
+    sound: true, soundMode: "beep", volume: 0.8,
+    notify: false, next: 0
+  }, store.get("br_settings", {}));
+
+  let stats = store.get("br_stats", {});
+  if (stats.date !== today()) stats = blankStats();
+
+  let endTime = null, timer = null, currentKey = null;
+  let totalMs = settings.minutes * 60000;
+  let songs = [];            // [{ id, name, blob, path? }]
+  let player = null, playerUrl = null;
+  let pushTimer = null;
+
+  /* ---------- Saving (this device first, then online if logged in) ---------- */
+  function save() {
+    store.set("br_settings", settings);
+    if (user) { clearTimeout(pushTimer); pushTimer = setTimeout(pushSettings, 600); }
+  }
+  function saveStats() {
+    store.set("br_stats", stats);
+    if (!user) return;
+    cloud.from("daily_stats").upsert({
+      user_id: user.id, day: stats.date,
+      walk: stats.walk, water: stats.water, stretch: stats.stretch, eyes: stats.eyes, other: stats.other
+    }).then(r => { if (r.error) authMsg("Could not save today's counts online: " + r.error.message); });
+  }
+  async function pushSettings() {
+    if (!user) return;
+    const { error } = await cloud.from("user_settings").upsert({
+      user_id: user.id,
+      minutes: settings.minutes,
+      types: settings.types,
+      sound: settings.sound,
+      sound_mode: String(settings.soundMode),
+      volume: settings.volume,
+      notify: settings.notify,
+      updated_at: new Date().toISOString()
+    });
+    authMsg(error ? "Could not save online: " + error.message : "All changes saved online.");
+  }
+
+  /* ---------- Reminder types (built-in + custom) ---------- */
+  function getType(key) {
+    if (BUILTIN[key]) return BUILTIN[key];
+    const c = settings.custom.find(x => "c" + x.id === key);
+    return c ? { emoji: "🔔", title: c.text, text: "Take a moment for this.", label: c.text, stat: "other" } : null;
+  }
+  function enabledKeys() {
+    const keys = settings.types.filter(k => getType(k));
+    return keys.length ? keys : ["water"];
+  }
+
+  /* ---------- Settings UI ---------- */
+  function renderChips() {
+    $("chips").innerHTML = "";
+    PRESETS.forEach(m => {
+      const b = document.createElement("button");
+      b.className = "chip" + (settings.minutes === m ? " on" : "");
+      b.textContent = m + " min";
+      b.onclick = () => setMinutes(m);
+      $("chips").appendChild(b);
+    });
+    $("custom").value = PRESETS.includes(settings.minutes) ? "" : settings.minutes;
+  }
+  function toggleType(key, on) {
+    settings.types = settings.types.filter(k => k !== key);
+    if (on) settings.types.push(key);
+    if (!settings.types.length) settings.types = [key];
+    save(); renderTypes();
+  }
+  function renderTypes() {
+    const box = $("types");
+    box.innerHTML = "";
+    const keys = Object.keys(BUILTIN).concat(settings.custom.map(c => "c" + c.id));
+    keys.forEach(key => {
+      const t = getType(key);
+      const l = document.createElement("label");
+      l.className = "item";
+      const c = document.createElement("input");
+      c.type = "checkbox";
+      c.checked = settings.types.includes(key);
+      c.onchange = () => toggleType(key, c.checked);
+      const name = document.createElement("span");
+      name.className = "grow";
+      name.textContent = t.emoji + " " + t.label;
+      l.append(c, name);
+      if (!BUILTIN[key]) {
+        const del = document.createElement("button");
+        del.className = "icon";
+        del.type = "button";
+        del.setAttribute("aria-label", "Delete " + t.label);
+        del.textContent = "×";
+        del.onclick = e => { e.preventDefault(); removeCustom(key); };
+        l.appendChild(del);
+      }
+      box.appendChild(l);
+    });
+  }
+  async function addCustom() {
+    const text = $("newText").value.trim();
+    if (!text) { $("newText").focus(); return; }
+    let id = Date.now();
+    if (user) {
+      const { data, error } = await cloud.from("custom_reminders")
+        .insert({ user_id: user.id, text }).select("id").single();
+      if (error) { authMsg("Could not add reminder online: " + error.message); return; }
+      id = data.id;
+    }
+    settings.custom.push({ id, text });
+    settings.types.push("c" + id);
+    $("newText").value = "";
+    save(); renderTypes();
+    $("newText").focus();
+  }
+  async function removeCustom(key) {
+    const c = settings.custom.find(x => "c" + x.id === key);
+    if (user && c) {
+      const { error } = await cloud.from("custom_reminders").delete().eq("id", c.id);
+      if (error) { authMsg("Could not delete online: " + error.message); return; }
+    }
+    settings.custom = settings.custom.filter(x => "c" + x.id !== key);
+    settings.types = settings.types.filter(k => k !== key);
+    if (!settings.types.length) settings.types = ["water"];
+    save(); renderTypes();
+  }
+  function renderStats() {
+    ["walk", "water", "stretch", "eyes", "other"].forEach(k => $("s-" + k).textContent = stats[k] || 0);
+  }
+  function setMinutes(m) {
+    m = Math.max(1, Math.min(240, Math.round(m)));
+    settings.minutes = m; save();
+    totalMs = m * 60000;
+    renderChips();
+    if (endTime) startTimer(); else showTime(totalMs);
+  }
+
+  /* ---------- Songs ---------- */
+  // Not logged in: songs live in this browser (IndexedDB).
+  // Logged in: songs live in Supabase Storage and are downloaded when you log in.
+  function openDB() {
+    return new Promise((res, rej) => {
+      if (!window.indexedDB) return rej(new Error("no idb"));
+      const r = indexedDB.open("br_db", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("songs", { keyPath: "id", autoIncrement: true });
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function dbRun(mode, fn) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const req = fn(db.transaction("songs", mode).objectStore("songs"));
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  const dbAll = () => dbRun("readonly", s => s.getAll());
+  const dbAdd = rec => dbRun("readwrite", s => s.add(rec));
+  const dbDel = id => dbRun("readwrite", s => s.delete(id));
+
+  async function cloudAddSong(name, blob) {
+    const m = (blob.name || "").match(/\.([a-z0-9]+)$/i);
+    const path = user.id + "/" + crypto.randomUUID() + "." + (m ? m[1].toLowerCase() : "mp3");
+    const up = await cloud.storage.from("songs").upload(path, blob, { contentType: blob.type || "audio/mpeg" });
+    if (up.error) throw up.error;
+    const { data, error } = await cloud.from("songs")
+      .insert({ user_id: user.id, name, file_path: path }).select("id").single();
+    if (error) { await cloud.storage.from("songs").remove([path]); throw error; }
+    return { id: data.id, name, blob, path };
+  }
+  async function cloudLoadSongs() {
+    const { data, error } = await cloud.from("songs").select("id,name,file_path").order("created_at");
+    if (error) throw error;
+    const out = [];
+    for (const r of data) {
+      const d = await cloud.storage.from("songs").download(r.file_path);
+      if (!d.error) out.push({ id: r.id, name: r.name, blob: d.data, path: r.file_path });
+    }
+    return out;
+  }
+
+  function setSongMsg(t) { $("songMsg").textContent = t; }
+
+  function renderSounds() {
+    const sel = $("soundSel");
+    sel.innerHTML = "";
+    const add = (v, label) => { const o = document.createElement("option"); o.value = v; o.textContent = label; sel.appendChild(o); };
+    add("beep", "Default beep");
+    if (songs.length > 1) add("random", "Random from my songs");
+    songs.forEach(s => add(String(s.id), "♪ " + s.name));
+    if (!Array.from(sel.options).some(o => o.value === String(settings.soundMode))) settings.soundMode = "beep";
+    sel.value = String(settings.soundMode);
+
+    const list = $("songList");
+    list.innerHTML = "";
+    songs.forEach(s => {
+      const li = document.createElement("li");
+      const n = document.createElement("span");
+      n.className = "name"; n.textContent = s.name;
+      const p = document.createElement("button");
+      p.className = "secondary small"; p.type = "button"; p.textContent = "Play";
+      p.onclick = () => togglePlay(s);
+      const d = document.createElement("button");
+      d.className = "icon"; d.type = "button"; d.textContent = "×";
+      d.setAttribute("aria-label", "Remove " + s.name);
+      d.onclick = () => removeSong(s.id);
+      li.append(n, p, d);
+      list.appendChild(li);
+    });
+  }
+  async function addSongs(files) {
+    let added = 0;
+    $("songBtn").disabled = true;
+    for (const f of files) {
+      const isAudio = f.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(f.name);
+      if (!isAudio) { setSongMsg(f.name + " is not an audio file."); continue; }
+      if (f.size > MAX_SONG_MB * 1048576) { setSongMsg(f.name + " is larger than " + MAX_SONG_MB + " MB."); continue; }
+      try {
+        const name = f.name.replace(/\.[^.]+$/, "");
+        setSongMsg("Adding " + name + "…");
+        let rec;
+        if (user) rec = await cloudAddSong(name, f);
+        else rec = { id: await dbAdd({ name, blob: f }), name, blob: f };
+        songs.push(rec);
+        added++;
+      } catch (e) {
+        setSongMsg("Could not save the song: " + (e.message || "storage error"));
+        break;
+      }
+    }
+    if (added) {
+      setSongMsg(added + (added === 1 ? " song added." : " songs added."));
+      if (settings.soundMode === "beep") settings.soundMode = String(songs[songs.length - 1].id);
+      save();
+    }
+    renderSounds();
+    $("songBtn").disabled = false;
+    $("songFile").value = "";
+  }
+  async function removeSong(id) {
+    const s = songs.find(x => x.id === id);
+    try {
+      if (user && s) {
+        await cloud.storage.from("songs").remove([s.path]);
+        await cloud.from("songs").delete().eq("id", id);
+      } else {
+        await dbDel(id);
+      }
+    } catch (e) { setSongMsg("Could not remove the song: " + (e.message || "error")); return; }
+    songs = songs.filter(x => x.id !== id);
+    stopAudio();
+    renderSounds(); save();
+  }
+
+  /* ---------- Audio ---------- */
+  function stopAudio() {
+    if (player) { player.pause(); player = null; }
+    if (playerUrl) { URL.revokeObjectURL(playerUrl); playerUrl = null; }
+    $("previewBtn").textContent = "Preview";
+  }
+  function playSong(song) {
+    stopAudio();
+    playerUrl = URL.createObjectURL(song.blob);
+    player = new Audio(playerUrl);
+    player.volume = settings.volume;
+    player.onended = stopAudio;
+    player.play().catch(() => { stopAudio(); beep(); });
+    $("previewBtn").textContent = "Stop";
+  }
+  function togglePlay(song) { if (player) stopAudio(); else playSong(song); }
+  function chosenSong() {
+    const m = settings.soundMode;
+    if (m === "beep") return null;
+    if (m === "random") return songs.length ? songs[Math.floor(Math.random() * songs.length)] : null;
+    return songs.find(s => String(s.id) === String(m)) || null;
+  }
+  function playAlert() {
+    const s = chosenSong();
+    if (s) playSong(s); else beep();
+  }
+  function beep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.25, 0.5].forEach((delay, i) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = i === 2 ? 880 : 660;
+        const peak = 0.3 * settings.volume;
+        g.gain.setValueAtTime(0.0001, ctx.currentTime + delay);
+        g.gain.exponentialRampToValueAtTime(peak, ctx.currentTime + delay + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + 0.22);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime + delay);
+        o.stop(ctx.currentTime + delay + 0.25);
+      });
+    } catch (e) {}
+  }
+
+  /* ---------- Timer ---------- */
+  const fmt = ms => {
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+    const mm = String(m).padStart(2, "0"), ss = String(r).padStart(2, "0");
+    return h ? h + ":" + mm + ":" + ss : mm + ":" + ss;
+  };
+  function showTime(ms) {
+    $("time").textContent = fmt(ms);
+    const pct = endTime ? Math.min(100, Math.max(0, (1 - ms / totalMs) * 100)) : 0;
+    $("water").style.height = pct + "%";
+    document.title = endTime ? fmt(ms) + " · Break Reminder" : "Break Reminder";
+  }
+  function startTimer(ms) {
+    totalMs = ms || settings.minutes * 60000;
+    endTime = Date.now() + totalMs;
+    store.set("br_end", { end: endTime, total: totalMs });
+    clearInterval(timer);
+    timer = setInterval(tick, 500);
+    $("status").textContent = "Next break in";
+    $("startBtn").textContent = "Pause";
+    tick();
+  }
+  function stopTimer() {
+    clearInterval(timer);
+    endTime = null;
+    store.set("br_end", null);
+    $("startBtn").textContent = "Start";
+    $("status").textContent = "Paused";
+  }
+  function tick() {
+    const left = endTime - Date.now();
+    if (left <= 0) { fire(); return; }
+    showTime(left);
+  }
+
+  /* ---------- Reminder popup ---------- */
+  function fire() {
+    clearInterval(timer);
+    endTime = null;
+    store.set("br_end", null);
+
+    const list = enabledKeys();
+    settings.next = settings.next % list.length;
+    currentKey = list[settings.next];
+    settings.next = (settings.next + 1) % list.length;
+    store.set("br_settings", settings);
+
+    const t = getType(currentKey);
+    $("pEmoji").textContent = t.emoji;
+    $("pTitle").textContent = t.title;
+    $("pText").textContent = t.text;
+    $("overlay").classList.add("show");
+    $("doneBtn").focus();
+    $("time").textContent = "00:00";
+    $("status").textContent = "Break time!";
+    $("water").style.height = "100%";
+    document.title = "Break time! · Break Reminder";
+
+    if (settings.sound) playAlert();
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    if (settings.notify && "Notification" in window && Notification.permission === "granted") {
+      try { new Notification(t.title, { body: t.text }); } catch (e) {}
+    }
+  }
+  function closePopup() { $("overlay").classList.remove("show"); stopAudio(); }
+
+  $("doneBtn").onclick = () => {
+    const t = getType(currentKey);
+    if (stats.date !== today()) stats = blankStats();
+    if (t) { stats[t.stat] = (stats[t.stat] || 0) + 1; saveStats(); renderStats(); }
+    closePopup();
+    startTimer();
+  };
+  $("snoozeBtn").onclick = () => { closePopup(); startTimer(5 * 60000); };
+
+  /* ---------- Login and online sync ---------- */
+  function authMsg(t) { $("authMsg").textContent = t; }
+
+  function refreshUI() {
+    renderChips(); renderTypes(); renderStats(); renderSounds(); syncSoundUI();
+    $("sound").checked = settings.sound;
+    $("volume").value = settings.volume;
+    $("notify").checked = settings.notify && "Notification" in window && Notification.permission === "granted";
+    if (!endTime) { totalMs = settings.minutes * 60000; showTime(totalMs); }
+  }
+
+  async function onSignedIn(u) {
+    user = u;
+    $("authOut").classList.add("hidden");
+    $("authIn").classList.remove("hidden");
+    $("who").textContent = "Signed in as " + u.email;
+    authMsg("Syncing…");
+    try {
+      await pullFromCloud();
+      authMsg("Synced. Everything you change is now saved online.");
+    } catch (e) {
+      authMsg("Could not sync: " + (e.message || e));
+    }
+    refreshUI();
+  }
+  function onSignedOut() {
+    user = null;
+    $("authOut").classList.remove("hidden");
+    $("authIn").classList.add("hidden");
+  }
+
+  async function pullFromCloud() {
+    const { data: row, error } = await cloud.from("user_settings")
+      .select("*").eq("user_id", user.id).maybeSingle();
+    if (error) throw error;
+
+    if (!row) {
+      await firstSync();      // new account: upload what is on this device
+    } else {
+      settings.minutes = row.minutes;
+      settings.types = row.types;
+      settings.sound = row.sound;
+      settings.soundMode = row.sound_mode;
+      settings.volume = Number(row.volume);
+      settings.notify = row.notify;
+      const cr = await cloud.from("custom_reminders").select("id,text").order("created_at");
+      if (cr.error) throw cr.error;
+      settings.custom = cr.data;
+      songs = await cloudLoadSongs();
+    }
+
+    const st = await cloud.from("daily_stats").select("*").eq("day", today()).maybeSingle();
+    if (st.error) throw st.error;
+    stats = st.data
+      ? { date: today(), walk: st.data.walk, water: st.data.water, stretch: st.data.stretch, eyes: st.data.eyes, other: st.data.other }
+      : blankStats();
+
+    store.set("br_settings", settings);
+    store.set("br_stats", stats);
+  }
+
+  async function firstSync() {
+    // custom reminders get new online ids, so fix the keys in the enabled list
+    const idMap = {}, uploaded = [];
+    for (const c of settings.custom) {
+      const { data, error } = await cloud.from("custom_reminders")
+        .insert({ user_id: user.id, text: c.text }).select("id,text").single();
+      if (error) throw error;
+      idMap["c" + c.id] = "c" + data.id;
+      uploaded.push(data);
+    }
+    settings.custom = uploaded;
+    settings.types = settings.types.map(k => idMap[k] || k);
+
+    // songs saved on this device move online
+    const local = songs.slice(), songMap = {};
+    songs = [];
+    for (const s of local) {
+      const rec = await cloudAddSong(s.name, s.blob);
+      songMap[String(s.id)] = String(rec.id);
+      songs.push(rec);
+    }
+    if (songMap[String(settings.soundMode)]) settings.soundMode = songMap[String(settings.soundMode)];
+    await pushSettings();
+  }
+
+  function creds() {
+    const email = $("email").value.trim(), password = $("password").value;
+    if (!email || password.length < 6) { authMsg("Enter your email and a password of at least 6 characters."); return null; }
+    return { email, password };
+  }
+  async function logIn() {
+    const c = creds(); if (!c) return;
+    authMsg("Logging in…");
+    const { error } = await cloud.auth.signInWithPassword(c);
+    if (error) authMsg(error.message);
+  }
+  async function signUp() {
+    const c = creds(); if (!c) return;
+    authMsg("Creating account…");
+    const { data, error } = await cloud.auth.signUp(c);
+    if (error) { authMsg(error.message); return; }
+    if (!data.session) authMsg("Account created. Open the confirmation email, click the link, then log in here.");
+  }
+
+  /* ---------- Buttons and inputs ---------- */
+  $("startBtn").onclick = () => endTime ? stopTimer() : startTimer();
+  $("resetBtn").onclick = () => {
+    stopTimer();
+    $("status").textContent = "Ready to start";
+    showTime(settings.minutes * 60000);
+  };
+  $("custom").onchange = e => { const v = parseInt(e.target.value, 10); if (v) setMinutes(v); };
+
+  $("addBtn").onclick = addCustom;
+  $("newText").addEventListener("keydown", e => { if (e.key === "Enter") addCustom(); });
+
+  function syncSoundUI() { $("soundOptions").classList.toggle("hidden", !settings.sound); }
+  $("sound").onchange = e => { settings.sound = e.target.checked; save(); syncSoundUI(); if (!settings.sound) stopAudio(); };
+
+  $("soundSel").onchange = e => { settings.soundMode = e.target.value; save(); stopAudio(); };
+  $("volume").oninput = e => { settings.volume = parseFloat(e.target.value); if (player) player.volume = settings.volume; save(); };
+  $("previewBtn").onclick = () => { if (player) stopAudio(); else playAlert(); };
+  $("songBtn").onclick = () => $("songFile").click();
+  $("songFile").onchange = e => addSongs(Array.from(e.target.files));
+
+  $("notify").onchange = async e => {
+    if (!e.target.checked) { settings.notify = false; save(); return; }
+    if (!("Notification" in window)) { alert("This browser does not support notifications."); e.target.checked = false; return; }
+    const p = await Notification.requestPermission();
+    settings.notify = p === "granted";
+    e.target.checked = settings.notify;
+    save();
+  };
+
+  $("loginBtn").onclick = logIn;
+  $("signupBtn").onclick = signUp;
+  $("password").addEventListener("keydown", e => { if (e.key === "Enter") logIn(); });
+  $("logoutBtn").onclick = async () => {
+    await cloud.auth.signOut();
+    store.set("br_settings", null);   // do not leave your reminders on a shared computer
+    store.set("br_stats", null);
+    location.reload();
+  };
+
+  /* ---------- Start ---------- */
+  async function main() {
+    refreshUI();
+
+    // Songs saved on this device (used when you are not logged in)
+    try { songs = await dbAll(); renderSounds(); }
+    catch (e) { setSongMsg("Song storage is not available in this browser, so only the default beep will work."); }
+
+    // Resume a running timer after a page reload
+    const saved = store.get("br_end", null);
+    if (saved && saved.end) {
+      totalMs = saved.total;
+      endTime = saved.end;
+      $("startBtn").textContent = "Pause";
+      $("status").textContent = "Next break in";
+      timer = setInterval(tick, 500);
+      tick();
+    }
+
+    if (!cloud) {
+      $("authOut").classList.add("hidden");
+      authMsg("Online saving is off. Add your Supabase URL and key at the top of the script to turn it on. Until then everything is saved only in this browser.");
+      return;
+    }
+    authMsg("Log in to keep your reminders and songs even if you clear the browser.");
+    cloud.auth.onAuthStateChange((event, session) => {
+      // run outside the callback, as the Supabase docs advise
+      setTimeout(() => {
+        if (session && (!user || user.id !== session.user.id)) onSignedIn(session.user);
+        else if (!session && user) onSignedOut();
+      }, 0);
+    });
+  }
+  main();
+})();
+</script>
+</body>
+</html>
