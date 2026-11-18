@@ -232,7 +232,7 @@
       <p class="note" id="songMsg">Pick MP3, WAV, M4A or any audio file.</p>
       <ul class="songs" id="songList"></ul>
     </div>
-    <p class="note">Keep this tab open in the background. Notifications help when you are in another window.</p>
+    <p class="note">Press Start once, then you can switch to any other tab or window. The sound will play the moment the time is over. Then come back and press Done.</p>
   </section>
 
   <section class="card">
@@ -278,6 +278,8 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
   };
   const PRESETS = [20, 30, 45, 60];
   const MAX_SONG_MB = 25;
+  // tiny silent sound, used to unlock audio playback while the user clicks Start
+  const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
 
   const $ = id => document.getElementById(id);
   const store = {
@@ -304,11 +306,66 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
   let stats = store.get("br_stats", {});
   if (stats.date !== today()) stats = blankStats();
 
-  let endTime = null, timer = null, currentKey = null;
+  let endTime = null, currentKey = null;
   let totalMs = settings.minutes * 60000;
   let songs = [];            // [{ id, name, blob, path? }]
-  let player = null, playerUrl = null;
   let pushTimer = null;
+
+  /* ---------- Audio objects (created once, unlocked by the Start click) ---------- */
+  const audioEl = new Audio();     // one audio element reused for every song
+  audioEl.preload = "auto";
+  let playerUrl = null;
+  let isPlaying = false;
+  let audioCtx = null;             // one AudioContext reused for the beep
+
+  function getCtx() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    return audioCtx;
+  }
+  // Called from a real click (Start, Done, Snooze). After this the browser lets us
+  // play sound later without any click, even if the tab is in the background.
+  function unlockAudio() {
+    try {
+      const ctx = getCtx();
+      if (ctx && ctx.state === "suspended") ctx.resume();
+    } catch (e) {}
+    try {
+      if (!isPlaying) {
+        audioEl.muted = true;
+        audioEl.src = SILENT_WAV;
+        const p = audioEl.play();
+        const done = () => { audioEl.pause(); audioEl.muted = false; };
+        if (p && p.then) p.then(done).catch(() => { audioEl.muted = false; });
+        else done();
+      }
+    } catch (e) {}
+  }
+
+  /* ---------- Background-proof ticker ---------- */
+  // Browsers slow down timers in hidden tabs. A Web Worker is not slowed down,
+  // so the alert fires right on time even when you are in another tab or window.
+  const ticker = (function () {
+    let worker = null, iv = null;
+    try {
+      const code = "let t=null;onmessage=function(e){clearInterval(t);if(e.data==='start'){t=setInterval(function(){postMessage(1)},500);}};";
+      worker = new Worker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
+      worker.onmessage = function () { tick(); };
+    } catch (e) { worker = null; }
+    return {
+      start() {
+        this.stop();
+        if (worker) worker.postMessage("start");
+        else iv = setInterval(tick, 500);
+      },
+      stop() {
+        if (worker) worker.postMessage("stop");
+        clearInterval(iv); iv = null;
+      }
+    };
+  })();
 
   /* ---------- Saving (this device first, then online if logged in) ---------- */
   function save() {
@@ -553,20 +610,25 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
   /* ---------- Audio ---------- */
   function stopAudio() {
-    if (player) { player.pause(); player = null; }
+    try { audioEl.pause(); } catch (e) {}
+    isPlaying = false;
     if (playerUrl) { URL.revokeObjectURL(playerUrl); playerUrl = null; }
     $("previewBtn").textContent = "Preview";
   }
+  audioEl.onended = stopAudio;
+
   function playSong(song) {
     stopAudio();
     playerUrl = URL.createObjectURL(song.blob);
-    player = new Audio(playerUrl);
-    player.volume = settings.volume;
-    player.onended = stopAudio;
-    player.play().catch(() => { stopAudio(); beep(); });
+    audioEl.muted = false;
+    audioEl.src = playerUrl;
+    audioEl.volume = settings.volume;
+    isPlaying = true;
     $("previewBtn").textContent = "Stop";
+    const p = audioEl.play();
+    if (p && p.catch) p.catch(() => { stopAudio(); beep(); });
   }
-  function togglePlay(song) { if (player) stopAudio(); else playSong(song); }
+  function togglePlay(song) { if (isPlaying) stopAudio(); else playSong(song); }
   function chosenSong() {
     const m = settings.soundMode;
     if (m === "beep") return null;
@@ -579,7 +641,9 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
   }
   function beep() {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = getCtx();
+      if (!ctx) return;
+      if (ctx.state === "suspended") ctx.resume();
       [0, 0.25, 0.5].forEach((delay, i) => {
         const o = ctx.createOscillator(), g = ctx.createGain();
         o.frequency.value = i === 2 ? 880 : 660;
@@ -608,31 +672,34 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
     document.title = endTime ? fmt(ms) + " · Break Reminder" : "Break Reminder";
   }
   function startTimer(ms) {
+    unlockAudio();   // this runs from a click, so the browser allows sound later
     totalMs = ms || settings.minutes * 60000;
     endTime = Date.now() + totalMs;
     store.set("br_end", { end: endTime, total: totalMs });
-    clearInterval(timer);
-    timer = setInterval(tick, 500);
+    ticker.start();
     $("status").textContent = "Next break in";
     $("startBtn").textContent = "Pause";
     tick();
   }
   function stopTimer() {
-    clearInterval(timer);
+    ticker.stop();
     endTime = null;
     store.set("br_end", null);
     $("startBtn").textContent = "Start";
     $("status").textContent = "Paused";
   }
   function tick() {
+    if (!endTime) return;
     const left = endTime - Date.now();
     if (left <= 0) { fire(); return; }
     showTime(left);
   }
+  // when you come back to the tab, update the display immediately
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
 
   /* ---------- Reminder popup ---------- */
   function fire() {
-    clearInterval(timer);
+    ticker.stop();
     endTime = null;
     store.set("br_end", null);
 
@@ -643,6 +710,10 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
     store.set("br_settings", settings);
 
     const t = getType(currentKey);
+
+    // Sound first, so it starts the very moment the time is over
+    if (settings.sound) playAlert();
+
     $("pEmoji").textContent = t.emoji;
     $("pTitle").textContent = t.title;
     $("pText").textContent = t.text;
@@ -653,7 +724,6 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
     $("water").style.height = "100%";
     document.title = "Break time! · Break Reminder";
 
-    if (settings.sound) playAlert();
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     if (settings.notify && "Notification" in window && Notification.permission === "granted") {
       try { new Notification(t.title, { body: t.text }); } catch (e) {}
@@ -791,8 +861,8 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
   $("sound").onchange = e => { settings.sound = e.target.checked; save(); syncSoundUI(); if (!settings.sound) stopAudio(); };
 
   $("soundSel").onchange = e => { settings.soundMode = e.target.value; save(); stopAudio(); };
-  $("volume").oninput = e => { settings.volume = parseFloat(e.target.value); if (player) player.volume = settings.volume; save(); };
-  $("previewBtn").onclick = () => { if (player) stopAudio(); else playAlert(); };
+  $("volume").oninput = e => { settings.volume = parseFloat(e.target.value); audioEl.volume = settings.volume; save(); };
+  $("previewBtn").onclick = () => { if (isPlaying) stopAudio(); else { unlockAudio(); playAlert(); } };
   $("songBtn").onclick = () => $("songFile").click();
   $("songFile").onchange = e => addSongs(Array.from(e.target.files));
 
@@ -830,9 +900,12 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       endTime = saved.end;
       $("startBtn").textContent = "Pause";
       $("status").textContent = "Next break in";
-      timer = setInterval(tick, 500);
+      ticker.start();
       tick();
     }
+
+    // After a reload the browser may block sound until you click anything on the page once
+    document.addEventListener("click", unlockAudio, { once: true });
 
     if (!cloud) {
       $("authOut").classList.add("hidden");
